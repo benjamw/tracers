@@ -1,0 +1,681 @@
+<!--
+
+
+TODO:
+change the number of lines to use the current (already drawn) canvas
+and just duplicate it and rotate it as needed
+
+this will also work for the mirroring and rotation scripts,
+just need some different transforms on the duplicated canvas.
+
+this will simplify the line drawing and may speed up rendering as it
+doesn't have to draw all the lines over and over,
+and it doesn't have to do funky math on the vertices.
+
+
+THINGS LEFT TO BUILD:
+- alternating line rotations
+
+More possible features:
+- add ability to increase/decrease the line length by pressing a pair of buttons
+- add ability to increase/decrease FPS (as far as possible, it may cap out due to processing power
+	or hard-coded limits in the browser)
+	requestAnimationFrame may be perfect for this...
+
+
+--><!doctype html>
+<html class="no-js" lang="en-US">
+<head>
+	<meta charset="utf-8">
+	<meta http-equiv="x-ua-compatible" content="ie=edge">
+	<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+	<title>LineSuperFollow</title>
+
+	<style>
+		* {
+			box-sizing: border-box;
+			margin: 0;
+			padding: 0;
+		}
+
+		html, body {
+			width: 100%;
+			height: 100%;
+		}
+
+		#canvas {
+			display: block;
+		}
+
+		.hidden {
+			display: none;
+		}
+	</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<canvas id="hidden" class="hidden"></canvas>
+<canvas id="hidden_mirror" class="hidden"></canvas>
+<canvas id="hidden_temp" class="hidden"></canvas>
+<canvas id="hidden_1" class="hidden"></canvas>
+<canvas id="hidden_2" class="hidden"></canvas>
+<canvas id="hidden_3" class="hidden"></canvas>
+<canvas id="hidden_4" class="hidden"></canvas>
+<canvas id="hidden_5" class="hidden"></canvas>
+<canvas id="hidden_6" class="hidden"></canvas>
+<canvas id="hidden_7" class="hidden"></canvas>
+<canvas id="hidden_8" class="hidden"></canvas>
+<script>
+	(function(window, document) {
+		// constants
+		var X = 0;
+		var Y = 1;
+		var RAD_STEP = 1 / 36 * Math.PI; // 5 degrees
+		var DELAY = 17; // use 17 ms for ~60fps (16.666667)
+
+		var canvas = document.getElementById('hidden'), // the workhorse canvas element
+			ctx = canvas.getContext('2d'), // the workhorse 2d canvas context
+			realCanvas = document.getElementById('canvas'), // the visible canvas element
+			realCtx = realCanvas.getContext('2d'), // the visible 2d canvas context
+			mousePos = [0,0], // the current mouse position
+			style = 1, // initial line style (1--8)
+			styleCount = 8, // the number of different styles (edit to fit actual style count)
+			xy = [ // XY coordinate registry
+					[0,0,0,0,0,0,0,0,0,0,0,0], // N-1 backups, and the main one; new -> old
+					[0,0,0,0,0,0,0,0,0,0,0,0]
+				],
+			xmove = 0, ymove = 0, // for the rubber band effect
+			rad = 0, // current rotation value
+			center = [0,0], // the center point of the canvas
+			double = 0, // double the size of the canvas
+			centerDouble = 0, // the center of the doubled canvas (it's a square, both are the same)
+			doubleCorner = [], // the location on the double canvas where the TL corner of the original canvas hits when the centers are aligned
+			lines = 1, // current number of lines drawn
+			maxLines = 8, // max number of lines
+			prevLines = 1, // hold the number of lines drawn before it was forced to change by rotateMode
+			mirrorMode = true, // reflect the lines about the x-axis
+			rotateMode = false, // rotate  every other line in opposing directions
+			backgroundWhite = false, // the background color: true = white, false = black
+			hue = 0, // the current hue value
+			colorCycling = true, // cycle the line colors
+			hueStep = 5, // the line color cycling speed
+			dotSize = 20, // the current dot size for the largest dot
+			timer; // the timer to keep the drawing going if the mouse isn't moving
+
+		function rand(min, max) {
+			return Math.floor(Math.random() * (max - min + 1) + min);
+		}
+
+		function map(val, in_min, in_max, out_min, out_max, round) {
+			if ('undefined' === typeof round) {
+				round = false;
+			}
+
+			if (round) {
+				return Math.min(
+					Math.max(
+						Math.round(
+							(((val - in_min) * (out_max - out_min)) / (in_max - in_min)) + out_min
+						)
+						, out_min
+					)
+					, out_max
+				);
+			}
+			else {
+				return (((val - in_min) * (out_max - out_min)) / (in_max - in_min)) + out_min;
+			}
+		}
+
+		// map a val in the range 0--xy.length -> 1--MAX_DOT_SIZE
+		function sizeMap(val) {
+			return map(val, 0, xy[X].length, 1, dotSize, true);
+		}
+
+		function resizeCanvas() {
+			var width = window.innerWidth;
+			var height = window.innerHeight;
+			center = [width / 2, height / 2];
+
+			double = Math.max(width, height) * 2;
+			centerDouble = double / 2;
+
+			doubleCorner = [
+				centerDouble - center[X],
+				centerDouble - center[Y]
+			];
+
+			realCanvas.width = width;
+			realCanvas.height = height;
+			canvas.width = double;
+			canvas.height = double;
+			console.log('Resized:', width, height, double, centerDouble, doubleCorner);
+		}
+
+		function clear() {
+			// clear the canvas
+			realCtx.clearRect(0, 0, realCanvas.width, realCanvas.height);
+			ctx.clearRect(0, 0, double, double);
+		}
+
+		function storeMousePos(evt) {
+			var rect = realCanvas.getBoundingClientRect();
+			mousePos = [
+				evt.clientX - rect.left,
+				evt.clientY - rect.top
+			];
+		}
+
+		function changeStyle(inc) {
+			if ('undefined' === typeof inc) {
+				inc = true;
+			}
+
+			if (inc) {
+				style++;
+				if (style > styleCount) {
+					style = 1;
+				}
+			}
+			else {
+				style--;
+				if (style < 1) {
+					style = styleCount;
+				}
+			}
+			console.log('Line Style:', style);
+		}
+
+		function color(l) {
+			if (backgroundWhite) {
+				// map l from 0--xy.length -> 30--70 : dark->light
+				l = map(l, 0, xy[X].length, 30, 70, true);
+			}
+			else {
+				// map l from xy.length--0 -> 30--70 : light->dark
+				l = map(l, xy[X].length, 0, 30, 70, true);
+			}
+
+			return 'hsl('+hue+',100%,'+l+'%)';
+		}
+
+		function rotate(xy, theta) {
+			var x = xy[X];
+			var y = xy[Y];
+			var s = Math.sin(theta);
+			var c = Math.cos(theta);
+
+			// translate point back to origin:
+			x -= center[X];
+			y -= center[Y];
+
+			// rotate point
+			var xr = x * c - y * s;
+			var yr = x * s + y * c;
+
+			// translate point back:
+			x = xr + center[X];
+			y = yr + center[Y];
+
+			return [x, y];
+		}
+
+		function rotateStep() {
+			rad += RAD_STEP;
+			if (rad >= (2 * Math.PI)) {
+				rad -= (4 * Math.PI);
+			}
+			if (rad <= (-2 * Math.PI)) {
+				rad += (4 * Math.PI);
+			}
+		}
+
+		function cycleColor() {
+			if ( ! colorCycling) {
+				return;
+			}
+
+			hue += hueStep;
+			if (hue >= 360) {
+				hue -= 360;
+			}
+			if (hue < 0) {
+				hue += 360;
+			}
+		}
+
+		function draw() {
+			var len = xy[X].length;
+			var half = Math.floor(len / 2);
+
+			ctx.strokeStyle = 'rgba(0,0,0,0)';
+			ctx.lineCap = 'round';
+			ctx.lineWidth = 1;
+
+			// translate so it's drawing in the middle
+			ctx.translate(doubleCorner[X], doubleCorner[Y]);
+
+			switch (style) {
+				case 1 : // tadpole line
+					for (var i = len; i > 0; i -= 1) {
+						if (i === 1) {
+							ctx.beginPath();
+							ctx.strokeStyle = color(0);
+							ctx.lineWidth = sizeMap(len - i);
+							ctx.moveTo(xy[X][i], xy[Y][i]);
+							ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+							ctx.stroke();
+
+							ctx.beginPath();
+							ctx.strokeStyle = color(len);
+							ctx.lineWidth = sizeMap(half);
+							ctx.moveTo(xy[X][i], xy[Y][i]);
+							ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+							ctx.stroke();
+						}
+						else {
+							ctx.beginPath();
+							ctx.strokeStyle = color(i);
+							ctx.lineWidth = sizeMap(len - i);
+							ctx.moveTo(xy[X][i], xy[Y][i]);
+							ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+							ctx.stroke();
+						}
+					}
+					break;
+
+				case 2 : // triangle line
+					for (var i = len; i > 0; i -= 1) {
+						ctx.beginPath();
+						// TODO: find a better way to calc this ?
+						if (i < half) {
+							ctx.strokeStyle = color(Math.abs(i - len));
+							ctx.lineWidth = sizeMap(i);
+						}
+						else {
+							ctx.strokeStyle = color(i);
+							ctx.lineWidth = sizeMap(Math.abs(i - len));
+						}
+						ctx.moveTo(xy[X][i], xy[Y][i]);
+						ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						ctx.stroke();
+					}
+					break;
+
+				case 3 : // dashed blinking line
+					for (var i = len; i > 0; i -= 1) {
+						if (0 === i % 2) {
+							continue;
+						}
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(0);
+						ctx.lineWidth = sizeMap(len - i);
+						ctx.moveTo(xy[X][i], xy[Y][i]);
+						ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						ctx.stroke();
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(len);
+						ctx.lineWidth = sizeMap(half - i);
+						ctx.moveTo(xy[X][i], xy[Y][i]);
+						ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						ctx.stroke();
+					}
+					break;
+
+				case 4 : // single small dot
+					ctx.beginPath();
+					ctx.strokeStyle = color(half);
+					ctx.lineWidth = sizeMap(2);
+					ctx.moveTo(xy[X][1], xy[Y][1]);
+					ctx.lineTo(xy[X][0], xy[Y][0]);
+					ctx.stroke();
+
+					break;
+
+				case 5 : // two fat dots
+					for (var i = len; i > 0; i -= 1) {
+						if ((i < len - 1) && (i > 1)) {
+							continue;
+						}
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(0);
+						ctx.lineWidth = sizeMap(len);
+						ctx.moveTo(xy[X][i], xy[Y][i]);
+						ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						ctx.stroke();
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(len);
+						ctx.lineWidth = sizeMap(half);
+						ctx.moveTo(xy[X][i], xy[Y][i]);
+						ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						ctx.stroke();
+					}
+					break;
+
+				case 6 : // swimming tadpole line
+					var prevRnd = [rand(-len, len), rand(-len, len)];
+					for (var i = len; i > 0; i -= 1) {
+						var rnd = [rand(-len, len), rand(-len, len)];
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(i);
+						ctx.lineWidth = sizeMap(len - i);
+						if (i > half) {
+							ctx.moveTo(xy[X][i] + prevRnd[X], xy[Y][i] + prevRnd[Y]);
+							ctx.lineTo(xy[X][i - 1] + rnd[X], xy[Y][i - 1] + rnd[Y]);
+						}
+						else if (i === half) {
+							ctx.moveTo(xy[X][i] + prevRnd[X], xy[Y][i] + prevRnd[Y]);
+							ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						}
+						else {
+							ctx.moveTo(xy[X][i], xy[Y][i]);
+							ctx.lineTo(xy[X][i - 1], xy[Y][i - 1]);
+						}
+						ctx.stroke();
+
+						prevRnd = rnd;
+					}
+					break;
+
+				case 7 : // crazy double line
+					var prevRndA = [rand(-len, len), rand(-len, len)];
+					var prevRndB = [rand(-len, len), rand(-len, len)];
+					for (var i = len; i > 0; i -= 1) {
+						if (0 === i % 2) {
+							continue;
+						}
+
+						var rndA = [rand(-len, len), rand(-len, len)];
+						var rndB = [rand(-len, len), rand(-len, len)];
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(0);
+						ctx.lineWidth = sizeMap(len - i);
+						ctx.moveTo(xy[X][i] + prevRndA[X], xy[Y][i] + prevRndA[Y]);
+						ctx.lineTo(xy[X][i - 1] + rndA[X], xy[Y][i - 1] + rndA[Y]);
+						ctx.stroke();
+
+						ctx.beginPath();
+						ctx.strokeStyle = color(len);
+						ctx.lineWidth = sizeMap(half - i);
+						ctx.moveTo(xy[X][i] + prevRndB[X], xy[Y][i] + prevRndB[Y]);
+						ctx.lineTo(xy[X][i - 1] + rndB[X], xy[Y][i - 1] + rndB[Y]);
+						ctx.stroke();
+
+						prevRndA = rndA;
+						prevRndB = rndB;
+					}
+					break;
+
+				case 8 : // single random sized dot
+					var rnd = rand(1, len);
+					ctx.beginPath();
+					ctx.strokeStyle = color(half);
+					ctx.lineWidth = sizeMap(rnd);
+					ctx.moveTo(xy[X][1], xy[Y][1]);
+					ctx.lineTo(xy[X][0], xy[Y][0]);
+					ctx.stroke();
+					break;
+			}
+
+			// translate back for duplication and rendering
+			ctx.translate(-doubleCorner[X], -doubleCorner[Y]);
+		}
+
+		function duplicate() {
+			var mirrorCanvas, mirrorCtx;
+			var tempCanvas, tempCtx;
+			var dupCanvas, dupCtx;
+
+			// TODO: the original image needs to be rotated if the rotateMode is on
+			// because when it gets mirrored, if it's not rotated first, it will be wonky
+			// and then the every-other lines need to be rotated as well...
+			// but then mirrored properly... this might be tricky...
+
+			// mirror the image first, then add in rotations
+			if (mirrorMode) {
+				mirrorCanvas = document.getElementById('hidden_mirror');
+				mirrorCtx = mirrorCanvas.getContext('2d');
+
+				// same as `canvas`
+				mirrorCanvas.width = double;
+				mirrorCanvas.height = double;
+
+				// translate, THEN mirror, then translate back, THEN draw
+				mirrorCtx.translate(centerDouble, centerDouble);
+				mirrorCtx.scale(1, -1);
+				mirrorCtx.translate(-centerDouble, -centerDouble);
+
+				mirrorCtx.drawImage(canvas, 0, 0);
+
+				// put the new mirrored image on the main one
+				ctx.drawImage(mirrorCanvas, 0, 0);
+			}
+
+			// store a temp copy of the now-mirrored drawing
+			tempCanvas = document.getElementById('hidden_temp');
+			tempCtx = tempCanvas.getContext('2d');
+
+			// same as `canvas`
+			tempCanvas.width = double;
+			tempCanvas.height = double;
+
+			// copy the current drawing
+			tempCtx.drawImage(canvas, 0, 0);
+
+			for (var n = 1; n <= lines; n += 1) {
+				dupCanvas = false;
+				dupCanvas = document.getElementById('hidden_'+n);
+				dupCtx = dupCanvas.getContext('2d');
+
+				dupCanvas.width = double;
+				dupCanvas.height = double;
+
+				// rotate, THEN draw
+				dupCtx.translate(centerDouble, centerDouble);
+				dupCtx.rotate((2 * Math.PI) * n / lines);
+				dupCtx.translate(-centerDouble, -centerDouble);
+
+				// copy over the rotated copy of the temp canvas
+				dupCtx.drawImage(tempCanvas, 0, 0);
+
+				// put the new rotated image on the main one
+				ctx.drawImage(dupCanvas, 0, 0);
+			}
+
+			// copy the current drawing to the visible canvas
+			realCtx.drawImage(canvas, -doubleCorner[X], -doubleCorner[Y]);
+		}
+
+		function step(evt) {
+			window.clearTimeout(timer);
+			timer = false;
+			if (evt) {
+				storeMousePos(evt);
+			}
+
+			// set the current values
+			xmove = xmove + (mousePos[X] - /* parent.x - */ xy[X][0]) / 10;
+			ymove = ymove + (mousePos[Y] - /* parent.y - */ xy[Y][0]) / 10;
+			xy[X][0] = xy[X][0] + (xmove + (mousePos[X] - /* parent.x - */ xy[X][0]) / 10);
+			xy[Y][0] = xy[Y][0] + (ymove + (mousePos[Y] - /* parent.y - */ xy[Y][0]) / 10);
+
+			clear();
+			cycleColor();
+			rotateStep();
+			draw();
+			duplicate();
+
+			// increment the position values
+			for (var n = xy[X].length - 1; n > 0; n -= 1) {
+				xy[X][n] = xy[X][n - 1];
+				xy[Y][n] = xy[Y][n - 1];
+			}
+
+			timer = window.setTimeout(step, DELAY);
+		}
+
+		function doBackground() {
+			document.getElementsByTagName('body')[0].style.backgroundColor = backgroundWhite ? '#ffffff' : '#000000';
+		}
+
+		function changeSettings(evt) {
+			switch (evt.keyCode) {
+				case 188 : // ( < ) - decrease line count
+					lines -= 1 + (+rotateMode);
+					if (lines === 0) {
+						lines = maxLines;
+					}
+					prevLines = lines;
+					console.log('Lines -:', lines);
+					break;
+
+				case 190 : // ( > ) - increase line count
+					lines += 1 + (+rotateMode);
+					if (lines === maxLines + 1) {
+						lines = 1;
+					}
+					prevLines = lines;
+					console.log('Lines +:', lines);
+					break;
+
+				case 219 : // ( [ ) - decrease color cycling speed
+					hueStep -= 1;
+					console.log('Color Cycle Speed -:', hueStep);
+					break;
+
+				case 221 : // ( ] ) - increase color cycle speed
+					hueStep += 1;
+					console.log('Color Cycle Speed +:', hueStep);
+					break;
+
+				case 189 : // ( - ) - decrease max dot size
+				case 109 : // ( - )(numpad)
+					dotSize -= 1;
+					if (dotsize < 1) {
+						dotSize = 1;
+					}
+					console.log('Dot Size -:', dotSize);
+					break;
+
+				case 187 : // ( + ) - increase max dot size
+				case 107 : // ( + )(numpad)
+					dotSize += 1;
+					console.log('Dot Size +:', dotSize);
+					break;
+
+				case 66 : // ( B ) - switch the background color
+					backgroundWhite = ! backgroundWhite;
+					doBackground();
+					console.log('Background:', backgroundWhite ? 'white' : 'black');
+					break;
+
+				case 77 : // ( M ) - toggle mirror mode
+					mirrorMode = ! mirrorMode;
+					console.log('Mirror Mode:', mirrorMode);
+					break;
+
+				case 82 : // ( R ) - toggle rotation
+					if (rotateMode) {
+						lines = prevLines;
+					}
+					else {
+						if (0 !== lines % 2) {
+							prevLines = lines;
+							lines += 1;
+						}
+					}
+					rotateMode = ! rotateMode;
+					console.log('Rotate Mode:', rotateMode);
+					break;
+
+				case 67 : // ( C ) - toggle color cycling
+					colorCycling = ! colorCycling;
+					console.log('Color Cycling:', colorCycling);
+					break;
+
+				case 57 : // ( ( ) - previous line style
+					changeStyle(false);
+					break;
+
+				case 48 : // ( ) ) - next line style
+					changeStyle(true);
+					break;
+
+				case 49 : // ( 1 ) - set line style to 1
+				case 97 : // ( 1 )(numpad)
+					style = 1;
+					console.log('Line Style:', style);
+					break;
+
+				case 50 : // ( 2 ) - set line style to 2
+				case 98 : // ( 2 )(numpad)
+					style = 2;
+					console.log('Line Style:', style);
+					break;
+
+				case 51 : // ( 3 ) - set line style to 3
+				case 99 : // ( 3 )(numpad)
+					style = 3;
+					console.log('Line Style:', style);
+					break;
+
+				case 52 : // ( 4 ) - set line style to 4
+				case 100 : // ( 4 )(numpad)
+					style = 4;
+					console.log('Line Style:', style);
+					break;
+
+				case 53 : // ( 5 ) - set line style to 5
+				case 101 : // ( 5 )(numpad)
+					style = 5;
+					console.log('Line Style:', style);
+					break;
+
+				case 54 : // ( 6 ) - set line style to 6
+				case 102 : // ( 6 )(numpad)
+					style = 6;
+					console.log('Line Style:', style);
+					break;
+
+				case 55 : // ( 7 ) - set line style to 7
+				case 103 : // ( 7 )(numpad)
+					style = 7;
+					console.log('Line Style:', style);
+					break;
+
+				case 56 : // ( 8 ) - set line style to 8
+				case 104 : // ( 8 )(numpad)
+					style = 8;
+					console.log('Line Style:', style);
+					break;
+			}
+		}
+
+		// add listeners
+		// resize the canvas to fill browser window dynamically
+		window.addEventListener('resize', resizeCanvas, false);
+
+		// draw the things
+		window.addEventListener('mousemove', step, false);
+
+		// change the line style
+		window.addEventListener('click', changeStyle, false);
+
+		// change the other settings
+		window.addEventListener('keydown', changeSettings, false);
+
+		// init the things
+		resizeCanvas();
+		clear();
+		doBackground();
+	})(window, document);
+</script>
+</body>
+</html>
