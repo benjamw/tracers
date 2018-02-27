@@ -11,13 +11,13 @@ Based on an old flash toy called "linesuperfollow".
 Keybindings:
 
 | Key(s) | Action | 
-| --- | --- |
-| B | Toggle background color |
-| < > | Change line count |
+| ---: | --- |
+| B | Toggle background color (white or black) |
+| < &nbsp; > | Change line count (1&ndash;8) |
 | M | Toggle mirror mode |
 | C | Toggle color cycling |
-| [ ] | Change color cycling speed |
+| [ &nbsp; ] | Change color cycling speed (can go backwards) |
 | - + | Change main dot size |
-| 1--8 | Set line style 1--8 |
-| ( ) | Prev/Next line style |
-| R | Toggle rotation (not working yet) |
+| 1--8 | Set line style 1&ndash;8 |
+| ( &nbsp; ) | Prev/Next line style |
+| ~~R~~ | ~~Toggle rotation~~ (not working yet) |
