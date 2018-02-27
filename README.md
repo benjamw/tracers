@@ -8,7 +8,7 @@ Based on an old flash toy called "linesuperfollow".
 - Move your mouse around the page
 - Be amazed
 
-Keybindings:
+Keybindings (just press the key, no <kbd>Shift</kbd> needed):
 
 | Key(s) | Action | 
 | ---: | --- |
@@ -18,6 +18,6 @@ Keybindings:
 | C | Toggle color cycling |
 | [ &nbsp; ] | Change color cycling speed (can go backwards) |
 | - + | Change main dot size |
-| 1--8 | Set line style 1&ndash;8 |
+| 1&ndash;8 | Set line style 1&ndash;8 |
 | ( &nbsp; ) | Prev/Next line style |
 | ~~R~~ | ~~Toggle rotation~~ (not working yet) |
