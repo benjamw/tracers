@@ -10,7 +10,8 @@ Based on an old flash toy called "linesuperfollow".
 
 Keybindings:
 
-|---|---|
+| Key(s) | Action | 
+| --- | --- |
 | B | Toggle background color |
 | < > | Change line count |
 | M | Toggle mirror mode |
