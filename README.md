@@ -8,7 +8,11 @@ Based on an old flash toy called "linesuperfollow".
 - Move your mouse around the page
 - Be amazed
 
-Keybindings (just press the key, no <kbd>Shift</kbd> needed):
+__NOTE__: should be used on a fairly powerful computer, or else it doesn't work that well.
+If you have suggestions for improving the framerate on lower quality machines, please let me know.
+
+### Keybindings
+(just press the key, no <kbd>Shift</kbd> needed):
 
 | Key(s) | Action | 
 | :---: | --- |
