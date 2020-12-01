@@ -1,7 +1,7 @@
 # tracers
 An HTML5 canvas plaything
 
-Based on an old flash toy called "linesuperfollow".
+Based on an old flash toy called ["Psychadellivision (linesuperfollow)"](https://www.deviantart.com/volcanic-penguin/art/Psychadellivision-14080073) by Volcanic-Penguin.
 
 ## Instructions
 - Open the page
@@ -12,7 +12,7 @@ __NOTE__: should be used on a fairly powerful computer, or else it doesn't work 
 If you have suggestions for improving the framerate on lower quality machines, please let me know.
 
 ### Keybindings
-(just press the key, no <kbd>Shift</kbd> needed):
+(just press the key, no <kbd>Shift</kbd> needed for uppercase letters):
 
 | Key(s) | Action | 
 | :---: | --- |
