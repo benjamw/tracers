@@ -69,10 +69,10 @@ More possible features:
 <script>
 	(function(window, document) {
 		// constants
-		var X = 0;
-		var Y = 1;
-		var RAD_STEP = 1 / 36 * Math.PI; // 5 degrees
-		var DELAY = 17; // use 17 ms for ~60fps (16.666667)
+		const X = 0;
+		const Y = 1;
+		const RAD_STEP = 1 / 36 * Math.PI; // 5 degrees
+		const DELAY = 17; // use 17 ms for ~60fps (16.666667)
 
 		var canvas = document.getElementById('hidden'), // the workhorse canvas element
 			ctx = canvas.getContext('2d'), // the workhorse 2d canvas context
@@ -86,6 +86,7 @@ More possible features:
 					[0,0,0,0,0,0,0,0,0,0,0,0]
 				],
 			xmove = 0, ymove = 0, // for the rubber band effect
+			band_strength = 10, // adjust for looser or tighter attachment (higher = looser, smaller = tighter) 10 = original
 			rad = 0, // current rotation value
 			center = [0,0], // the center point of the canvas
 			double = 0, // double the size of the canvas
@@ -501,10 +502,10 @@ More possible features:
 			}
 
 			// set the current values
-			xmove = xmove + (mousePos[X] - /* parent.x - */ xy[X][0]) / 10;
-			ymove = ymove + (mousePos[Y] - /* parent.y - */ xy[Y][0]) / 10;
-			xy[X][0] = xy[X][0] + (xmove + (mousePos[X] - /* parent.x - */ xy[X][0]) / 10);
-			xy[Y][0] = xy[Y][0] + (ymove + (mousePos[Y] - /* parent.y - */ xy[Y][0]) / 10);
+			xmove = xmove + (mousePos[X] - /* parent.x - */ xy[X][0]) / band_strength;
+			ymove = ymove + (mousePos[Y] - /* parent.y - */ xy[Y][0]) / band_strength;
+			xy[X][0] = xy[X][0] + (xmove + (mousePos[X] - /* parent.x - */ xy[X][0]) / band_strength);
+			xy[Y][0] = xy[Y][0] + (ymove + (mousePos[Y] - /* parent.y - */ xy[Y][0]) / band_strength);
 
 			clear();
 			cycleColor();
@@ -529,7 +530,7 @@ More possible features:
 			switch (evt.keyCode) {
 				case 188 : // ( < ) - decrease line count
 					lines -= 1 + (+rotateMode);
-					if (lines === 0) {
+					if (lines <= 0) {
 						lines = maxLines;
 					}
 					prevLines = lines;
@@ -538,7 +539,7 @@ More possible features:
 
 				case 190 : // ( > ) - increase line count
 					lines += 1 + (+rotateMode);
-					if (lines === maxLines + 1) {
+					if (lines >= maxLines + 1) {
 						lines = 1;
 					}
 					prevLines = lines;
