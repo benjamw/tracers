@@ -1,26 +1,12 @@
 <!--
 
-
-TODO:
-change the number of lines to use the current (already drawn) canvas
-and just duplicate it and rotate it as needed
-
-this will also work for the mirroring and rotation scripts,
-just need some different transforms on the duplicated canvas.
-
-this will simplify the line drawing and may speed up rendering as it
-doesn't have to draw all the lines over and over,
-and it doesn't have to do funky math on the vertices.
-
-
 THINGS LEFT TO BUILD:
 - alternating line rotations
 
 More possible features:
 - add ability to increase/decrease the line length by pressing a pair of buttons
-- add ability to increase/decrease FPS (as far as possible, it may cap out due to processing power
-	or hard-coded limits in the browser)
-	requestAnimationFrame may be perfect for this...
+		(this will need a dynamic XY register)
+- add ability to increase/decrease the rubber band strength by pressing a pair of buttons
 
 
 --><!doctype html>
@@ -57,19 +43,18 @@ More possible features:
 		const X = 0;
 		const Y = 1;
 
-		let canvas = document.getElementById('canvas'), // the workhorse canvas element
-			ctx = canvas.getContext('2d'), // the workhorse 2d canvas context
+		let canvas = document.getElementById('canvas'), // the canvas element
+			ctx = canvas.getContext('2d'), // the 2d canvas context
 			mousePos = [0,0], // the current mouse position
-			style = 1, // initial line style (1--8)
+			style = 1, // line style (1--styleCount)
 			styleCount = 8, // the number of different styles (edit to fit actual style count)
 			xy = [ // XY coordinate registry
 				[0,0,0,0,0,0,0,0,0,0,0,0], // N-1 backups, and the main one; new -> old
 				[0,0,0,0,0,0,0,0,0,0,0,0]
 			],
 			xMove = 0, yMove = 0, // for the rubber band effect
-			band_strength = 30, // adjust for looser or tighter attachment (higher = looser, smaller = tighter) 10 = original
-			center = [0,0], // the center point of the canvas
-			lines = 3, // current number of lines drawn
+			band_strength = 30, // adjust for looser or tighter attachment (higher = looser, smaller = tighter) 30 = original
+			lines = 3, // number of lines drawn (1--maxLines)
 			maxLines = 8, // max number of lines
 			mirrorMode = true, // reflect the lines about the x-axis
 			backgroundWhite = false, // the background color: true = white, false = black
@@ -78,10 +63,27 @@ More possible features:
 			hueStep = 5, // the line color cycling speed
 			dotSize = 20; // the current dot size for the largest dot
 
+		/**
+		 * Generate a random number between min and max (inclusive)
+		 *
+		 * @param min number the min value
+		 * @param max number the max value
+		 */
 		function rand(min, max) {
 			return Math.floor(Math.random() * (max - min + 1) + min);
 		}
 
+		/**
+		 * Map a value in a given range to a different range
+		 *
+		 * @param val number the value to be mapped
+		 * @param in_min number the minimum value in the input range
+		 * @param in_max number the maximum value in the input range
+		 * @param out_min number the minimum value in the output range
+		 * @param out_max number the maximum value in the output range
+		 * @param round bool should the mapped value be rounded
+		 * @return number mapped value
+		 */
 		function map(val, in_min, in_max, out_min, out_max, round) {
 			if ('undefined' === typeof round) {
 				round = false;
@@ -101,11 +103,12 @@ More possible features:
 			return map(val, 0, xy[X].length, 1, dotSize, true);
 		}
 
+		/**
+		 * Resize the canvas after a window resize
+		 */
 		function resizeCanvas() {
 			let width = window.innerWidth;
 			let height = window.innerHeight;
-
-			center = [width / 2, height / 2];
 
 			canvas.width = width;
 			canvas.height = height;
@@ -113,11 +116,19 @@ More possible features:
 			console.log('Resized:', width, height);
 		}
 
+		/**
+		 * Clear the canvas
+		 */
 		function clear() {
-			// clear the canvas
 			ctx.clearRect(0, 0, canvas.width, canvas.height);
 		}
 
+		/**
+		 * Change the current line style value by either incrementing
+		 * or decrementing the line style value
+		 *
+		 * @param inc bool increment the line style value
+		 */
 		function changeStyle(inc) {
 			if ('undefined' === typeof inc) {
 				inc = true;
@@ -135,37 +146,57 @@ More possible features:
 					style = styleCount;
 				}
 			}
-			console.log('Line Style:', style);
+
+			console.log('Line Style', (inc ? '+' : '-'), ':', style);
 		}
 
-		function color(l) {
+		/**
+		 * Generate and return an HSL color string
+		 *
+		 * @param li number the lightness of the line
+		 * @return string
+		 */
+		function color(li) {
 			if (backgroundWhite) {
-				// map l from 0--xy.length -> 30--70 : dark->light
-				l = map(l, 0, xy[X].length, 30, 70, true);
+				// map li from 0--xy.length -> 30--70 : dark->light
+				li = map(li, 0, xy[X].length, 30, 70, true);
 			}
 			else {
-				// map l from xy.length--0 -> 30--70 : light->dark
-				l = map(l, xy[X].length, 0, 30, 70, true);
+				// map li from xy.length--0 -> 30--70 : light->dark
+				li = map(li, xy[X].length, 0, 30, 70, true);
 			}
 
-			return 'hsl('+hue+',100%,'+l+'%)';
+			return 'hsl('+hue+',100%,'+li+'%)';
 		}
 
+		/**
+		 * Cycle the color to the next value on the color wheel
+		 */
 		function cycleColor() {
 			if ( ! colorCycling) {
 				return;
 			}
 
 			hue += hueStep;
+
 			if (hue >= 360) {
 				hue -= 360;
 			}
+
 			if (hue < 0) {
 				hue += 360;
 			}
 		}
 
 		// rotates a point (A) around another point (B)
+		/**
+		 * Rotates a point (a) around another point (b)
+		 *
+		 * @param a obj{x: num, y: num} the point to rotate
+		 * @param b obj{x: num, y: num} the point to rotate around
+		 * @param angle number the angle to rotate the point (in degrees)
+		 * @return obj{x: num, y: num} the rotated point
+		 */
 		function rotateAround(a, b, angle) {
 			angle = (angle) * (Math.PI / 180); // Convert to radians
 			
@@ -175,13 +206,56 @@ More possible features:
 			return { x: rotatedX, y: rotatedY };
 		}
 
-		// draws one of the "tadpole" lines at an angle specified in degrees 
+	  /**
+		 * Mirror a given Y coordinate about the center line
+		 *
+		 * @param y
+		 * @return number
+		 */
+		function mirror(y) {
+			let offset = y - (canvas.height / 2);
+			return (canvas.height / 2) - offset;
+		}
+
+	  /**
+		 * Draw a line (and possibly a mirrored line) from the from point
+		 * to the to point, with the given color and size
+		 *
+	   * @param fr obj{x: num, y: num} the from point
+	   * @param to obj{x: num, y: num} the to point
+	   * @param li number the line lightness
+	   * @param size number the line width
+	   */
+		function drawLine(fr, to, li, size) {
+			ctx.beginPath();
+			ctx.strokeStyle = color(li);
+			ctx.lineWidth = sizeMap(size);
+			ctx.moveTo(fr.x, fr.y);
+			ctx.lineTo(to.x, to.y);
+			ctx.stroke();
+
+			if (mirrorMode) {
+				ctx.beginPath();
+				ctx.strokeStyle = color(li);
+				ctx.lineWidth = sizeMap(size);
+				ctx.moveTo(fr.x, mirror(fr.y));
+				ctx.lineTo(to.x, mirror(to.y));
+				ctx.stroke();
+			}
+		}
+
+	  /**
+		 * Draw the "tadpole" line style
+		 * A dot with a dark section in the middle that trails off to nothing
+		 *
+	   * @param angle number
+	   */
 		function tadpole(angle) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
 
 			for (let i = len; i > 0; i -= 1) {
-				let from = rotateAround(
+				let fr = rotateAround(
 					{ x: xy[X][i], y: xy[Y][i] },
 					{ x: canvas.width / 2, y: canvas.height / 2 },
 					angle
@@ -194,38 +268,27 @@ More possible features:
 				);
 
 				if (i === 1) {
-					ctx.beginPath();
-					ctx.strokeStyle = color(0);
-					ctx.lineWidth = sizeMap(len - i);
-					ctx.moveTo(from.x, from.y);
-					ctx.lineTo(to.x, to.y);
-					ctx.stroke();
-
-					ctx.beginPath();
-					ctx.strokeStyle = color(len);
-					ctx.lineWidth = sizeMap(half);
-					ctx.moveTo(from.x, from.y);
-					ctx.lineTo(to.x, to.y);
-					ctx.stroke();
+					drawLine(fr, to, 0, len - i);
+					drawLine(fr, to, len, half);
 				}
 				else {
-					ctx.beginPath();
-					ctx.strokeStyle = color(i);
-					ctx.lineWidth = sizeMap(len - i);
-					ctx.moveTo(from.x, from.y);
-					ctx.lineTo(to.x, to.y);
-					ctx.stroke();
+					drawLine(fr, to, i, len - i);
 				}
 			}
 		}
 
-		// draws one of the "triangle" lines at an angle specified in degrees 
+	  /**
+		 * Draw the "triangle" line style
+		 * A line that starts thin, grows, then thins out again ---===####===---
+		 *
+	   * @param angle number
+	   */
 		function triangle(angle) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
 
 			for (let i = len; i > 0; i -= 1) {
-				let from = rotateAround(
+				let fr = rotateAround(
 					{ x: xy[X][i], y: xy[Y][i] },
 					{ x: canvas.width / 2, y: canvas.height / 2 },
 					angle
@@ -237,24 +300,27 @@ More possible features:
 					angle
 				);
 
-				ctx.beginPath();
-				
-				// TODO: find a better way to calc this ?
+				let li, size;
+
 				if (i < half) {
-					ctx.strokeStyle = color(Math.abs(i - len));
-					ctx.lineWidth = sizeMap(i);
+					li = Math.abs(i - len);
+					size = i;
 				}
 				else {
-					ctx.strokeStyle = color(i);
-					ctx.lineWidth = sizeMap(Math.abs(i - len));
+					li = i;
+					size = Math.abs(i - len);
 				}
 
-				ctx.moveTo(from.x, from.y);
-				ctx.lineTo(to.x, to.y);
-				ctx.stroke();
+				drawLine(fr, to, li, size);
 			}
 		}
 
+	  /**
+		 * Draw the "blinky" line style
+		 * A dot with a dark section in the middle that shrinks and blinks, giving a dashed line effect
+		 *
+	   * @param angle number
+	   */
 		function blinky(angle = 0) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
@@ -264,7 +330,7 @@ More possible features:
 					continue;
 				}
 
-				let from = rotateAround(
+				let fr = rotateAround(
 					{ x: xy[X][i], y: xy[Y][i] },
 					{ x: canvas.width / 2, y: canvas.height / 2 },
 					angle
@@ -276,27 +342,19 @@ More possible features:
 					angle
 				);
 
-				ctx.beginPath();
-				ctx.strokeStyle = color(0);
-				ctx.lineWidth = sizeMap(len - i);
-				ctx.moveTo(from.x, from.y);
-				ctx.lineTo(to.x, to.y);
-				ctx.stroke();
-
-				ctx.beginPath();
-				ctx.strokeStyle = color(len);
-				ctx.lineWidth = sizeMap(half - i);
-				ctx.moveTo(from.x, from.y);
-				ctx.lineTo(to.x, to.y);
-				ctx.stroke();
+				drawLine(fr, to, 0, len - i);
+				drawLine(fr, to, len, len - i - 2);
 			}
 		}
 
+	  /**
+		 * Draw the "dot" line style
+		 * A single dot
+		 *
+	   * @param angle number
+	   */
 		function dot(angle) {
-			let len = xy[X].length;
-			let half = Math.floor(len / 2);
-
-			let from = rotateAround(
+			let fr = rotateAround(
 				{ x: xy[X][1], y: xy[Y][1] },
 				{ x: canvas.width / 2, y: canvas.height / 2 },
 				angle
@@ -308,14 +366,16 @@ More possible features:
 				angle
 			);
 
-			ctx.beginPath();
-			ctx.strokeStyle = color(half);
-			ctx.lineWidth = sizeMap(2);
-			ctx.moveTo(from.x, from.y);
-			ctx.lineTo(to.x, to.y);
-			ctx.stroke();
+			drawLine(fr, to, 0, 2);
 		}
 
+	  /**
+		 * Draw the "fat dot" line style
+		 * Two large dots with dark sections in the middle,
+		 * one chasing the other
+		 *
+	   * @param angle number
+	   */
 		function fatDot(angle) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
@@ -325,7 +385,7 @@ More possible features:
 					continue;
 				}
 
-				let from = rotateAround(
+				let fr = rotateAround(
 					{ x: xy[X][i], y: xy[Y][i] },
 					{ x: canvas.width / 2, y: canvas.height / 2 },
 					angle
@@ -337,22 +397,17 @@ More possible features:
 					angle
 				);
 
-				ctx.beginPath();
-				ctx.strokeStyle = color(0);
-				ctx.lineWidth = sizeMap(len);
-				ctx.moveTo(from.x, from.y);
-				ctx.lineTo(to.x, to.y);
-				ctx.stroke();
-
-				ctx.beginPath();
-				ctx.strokeStyle = color(len);
-				ctx.lineWidth = sizeMap(half);
-				ctx.moveTo(from.x, from.y);
-				ctx.lineTo(to.x, to.y);
-				ctx.stroke();
+				drawLine(fr, to, 0, len);
+				drawLine(fr, to, len, half);
 			}
 		}
 
+	  /**
+		 * Draw the "swimming tadpole" line style
+		 * A large dot that trails off to nothing, but the trail is chaotic and random
+		 *
+	   * @param angle number
+	   */
 		function swimmingTadpole(angle) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
@@ -362,67 +417,62 @@ More possible features:
 			for (let i = len; i > 0; i -= 1) {
 				let rnd = [rand(-len, len), rand(-len, len)];
 
-				ctx.beginPath();
-				ctx.strokeStyle = color(i);
-				ctx.lineWidth = sizeMap(len - i);
-
-				let from = { x: 0, y: 0 }
-				let to = { x: 0, y: 0 }
+				let fr = {x: 0, y: 0}
+				let to = {x: 0, y: 0}
 
 				if (i > half) {
-					from = rotateAround(
-						{ x: xy[X][i] + prevRnd[X], y: xy[Y][i] + prevRnd[Y] },
-						{ x: canvas.width / 2, y: canvas.height / 2 },
+					fr = rotateAround(
+						{x: xy[X][i] + prevRnd[X], y: xy[Y][i] + prevRnd[Y]},
+						{x: canvas.width / 2, y: canvas.height / 2},
 						angle
 					);
 
 					to = rotateAround(
-						{ x: xy[X][i - 1] + rnd[X], y: xy[Y][i - 1] + rnd[Y] },
-						{ x: canvas.width / 2, y: canvas.height / 2 },
+						{x: xy[X][i - 1] + rnd[X], y: xy[Y][i - 1] + rnd[Y]},
+						{x: canvas.width / 2, y: canvas.height / 2},
 						angle
 					);
-
-					ctx.moveTo(from.x, from.y);
-					ctx.lineTo(to.x, to.y);
 				}
 				else if (i === half) {
-					from = rotateAround(
-						{ x: xy[X][i] + prevRnd[X], y: xy[Y][i] + prevRnd[Y] },
-						{ x: canvas.width / 2, y: canvas.height / 2 },
+					fr = rotateAround(
+						{x: xy[X][i] + prevRnd[X], y: xy[Y][i] + prevRnd[Y]},
+						{x: canvas.width / 2, y: canvas.height / 2},
 						angle
 					);
 
 					to = rotateAround(
-						{ x: xy[X][i - 1], y: xy[Y][i - 1] },
-						{ x: canvas.width / 2, y: canvas.height / 2 },
+						{x: xy[X][i - 1], y: xy[Y][i - 1]},
+						{x: canvas.width / 2, y: canvas.height / 2},
 						angle
 					);
-
-					ctx.moveTo(from.x, from.y);
-					ctx.lineTo(to.x, to.y);
 				}
 				else {
-					from = rotateAround(
-						{ x: xy[X][i], y: xy[Y][i] },
-						{ x: canvas.width / 2, y: canvas.height / 2 },
+					fr = rotateAround(
+						{x: xy[X][i], y: xy[Y][i]},
+						{x: canvas.width / 2, y: canvas.height / 2},
 						angle
 					);
 
 					to = rotateAround(
-						{ x: xy[X][i - 1], y: xy[Y][i - 1] },
-						{ x: canvas.width / 2, y: canvas.height / 2 },
+						{x: xy[X][i - 1], y: xy[Y][i - 1]},
+						{x: canvas.width / 2, y: canvas.height / 2},
 						angle
 					);
-
-					ctx.moveTo(from.x, from.y);
-					ctx.lineTo(to.x, to.y);
 				}
 
-				ctx.stroke();
+				drawLine(fr, to, i, len - i);
+
 				prevRnd = rnd;
 			}
 		}
 
+	  /**
+		 * Draw the "crazy double" line style
+		 * Two "blinky" dots, one smaller and darker than the other
+		 * where the trails for both are chaotic and random
+		 *
+	   * @param angle number
+	   */
 		function crazyDouble(angle) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
@@ -438,7 +488,7 @@ More possible features:
 				let rndA = [rand(-len, len), rand(-len, len)];
 				let rndB = [rand(-len, len), rand(-len, len)];
 
-				let fromA = rotateAround(
+				let frA = rotateAround(
 					{ x: xy[X][i] + prevRndA[X], y: xy[Y][i] + prevRndA[Y] },
 					{ x: canvas.width / 2, y: canvas.height / 2 },
 					angle
@@ -450,7 +500,7 @@ More possible features:
 					angle
 				);
 
-				let fromB = rotateAround(
+				let frB = rotateAround(
 					{ x: xy[X][i] + prevRndB[X], y: xy[Y][i] + prevRndB[Y] },
 					{ x: canvas.width / 2, y: canvas.height / 2 },
 					angle
@@ -462,31 +512,26 @@ More possible features:
 					angle
 				);
 
-				ctx.beginPath();
-				ctx.strokeStyle = color(0);
-				ctx.lineWidth = sizeMap(len - i);
-				ctx.moveTo(fromA.x, fromA.y);
-				ctx.lineTo(toA.x, toA.y);
-				ctx.stroke();
-
-				ctx.beginPath();
-				ctx.strokeStyle = color(len);
-				ctx.lineWidth = sizeMap(half - i);
-				ctx.moveTo(fromB.x, fromB.y);
-				ctx.lineTo(toB.x, toB.y);
-				ctx.stroke();
+				drawLine(frA, toA, 0, len - i);
+				drawLine(frB, toB, len, half - i);
 
 				prevRndA = rndA;
 				prevRndB = rndB;
 			}
 		}
 
+	  /**
+		 * Draw the "random dot" line style
+		 * A single dot that changes size randomly
+		 *
+	   * @param angle number
+	   */
 		function randomDot(angle) {
 			let len = xy[X].length;
 			let half = Math.floor(len / 2);
 			let rnd = rand(1, len);
 
-			let from = rotateAround(
+			let fr = rotateAround(
 				{ x: xy[X][1], y: xy[Y][1] },
 				{ x: canvas.width / 2, y: canvas.height / 2 },
 				angle
@@ -498,14 +543,12 @@ More possible features:
 				angle
 			);
 
-			ctx.beginPath();
-			ctx.strokeStyle = color(half);
-			ctx.lineWidth = sizeMap(rnd);
-			ctx.moveTo(from.x, from.y);
-			ctx.lineTo(to.x, to.y);
-			ctx.stroke();
+			drawLine(fr, to, 0, rnd);
 		}
 
+	  /**
+		 * Render the canvas
+	   */
 		function draw() {
 			ctx.strokeStyle = 'rgba(0,0,0,0)';
 			ctx.lineCap = 'round';
@@ -562,6 +605,9 @@ More possible features:
 			}
 		}
 
+	  /**
+		 * Step all values for the next frame
+	   */
 		function step() {
 			// set the current values
 			xMove = xMove + (mousePos[X] - /* parent.x - */ xy[X][0]) / band_strength;
@@ -582,14 +628,27 @@ More possible features:
 			window.requestAnimationFrame(step);
 		}
 
+	  /**
+		 * Change the background
+	   */
 		function doBackground() {
 			document.getElementsByTagName('body')[0].style.backgroundColor = backgroundWhite ? '#ffffff' : '#000000';
 		}
 
+	  /**
+		 * Store the mouse position based on an event
+		 *
+	   * @param evt Event
+	   */
 		function mouseMoved(evt) {
 			mousePos = [evt.offsetX, evt.offsetY];
 		}
 
+	  /**
+		 * Update settings based on user input
+		 *
+	   * @param evt Event
+	   */
 		function changeSettings(evt) {
 			switch (evt.keyCode) {
 				case 188 : // ( < ) - decrease line count
